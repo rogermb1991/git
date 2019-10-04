@@ -1,0 +1,220 @@
+package altec.perturbationEffect;
+
+import java.awt.BasicStroke;
+import java.awt.BorderLayout;
+import java.awt.Color;
+import java.awt.Graphics;
+import java.awt.Graphics2D;
+import java.awt.Stroke;
+import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
+import java.io.File;
+import java.util.Locale;
+
+import javax.swing.JButton;
+import javax.swing.JFrame;
+import javax.swing.JPanel;
+import javax.swing.WindowConstants;
+
+import org.hipparchus.geometry.euclidean.threed.Vector3D;
+import org.hipparchus.ode.AbstractIntegrator;
+import org.hipparchus.ode.nonstiff.AdaptiveStepsizeIntegrator;
+import org.hipparchus.ode.nonstiff.ClassicalRungeKuttaIntegrator;
+import org.hipparchus.ode.nonstiff.DormandPrince853Integrator;
+import org.hipparchus.util.FastMath;
+import org.orekit.bodies.CelestialBodyFactory;
+import org.orekit.bodies.OneAxisEllipsoid;
+import org.orekit.data.DataProvidersManager;
+import org.orekit.data.DirectoryCrawler;
+import org.orekit.errors.OrekitException;
+import org.orekit.forces.ForceModel;
+import org.orekit.forces.drag.DragForce;
+import org.orekit.forces.drag.IsotropicDrag;
+import org.orekit.forces.drag.atmosphere.HarrisPriester;
+import org.orekit.forces.gravity.HolmesFeatherstoneAttractionModel;
+import org.orekit.forces.gravity.ThirdBodyAttraction;
+import org.orekit.forces.gravity.potential.GravityFieldFactory;
+import org.orekit.forces.gravity.potential.NormalizedSphericalHarmonicsProvider;
+import org.orekit.forces.radiation.IsotropicRadiationClassicalConvention;
+import org.orekit.forces.radiation.IsotropicRadiationSingleCoefficient;
+import org.orekit.forces.radiation.RadiationSensitive;
+import org.orekit.forces.radiation.SolarRadiationPressure;
+import org.orekit.frames.Frame;
+import org.orekit.frames.FramesFactory;
+import org.orekit.orbits.CartesianOrbit;
+import org.orekit.orbits.KeplerianOrbit;
+import org.orekit.orbits.Orbit;
+import org.orekit.orbits.OrbitType;
+import org.orekit.orbits.PositionAngle;
+import org.orekit.propagation.SpacecraftState;
+import org.orekit.propagation.analytical.KeplerianPropagator;
+import org.orekit.propagation.numerical.NumericalPropagator;
+import org.orekit.time.AbsoluteDate;
+import org.orekit.time.TimeScalesFactory;
+import org.orekit.utils.Constants;
+import org.orekit.utils.IERSConventions;
+import org.orekit.utils.PVCoordinates;
+
+import javafx.application.Application; 
+import javafx.scene.Group; 
+import javafx.scene.Scene; 
+import javafx.stage.Stage; 
+import javafx.scene.chart.LineChart; 
+import javafx.scene.chart.NumberAxis; 
+import javafx.scene.chart.XYChart;
+import javafx.scene.chart.XYChart.Series; 
+
+
+public class PerturbationEffect2 {  
+    
+    
+    public static double getLossAltitude() {
+    	
+   	 try {
+
+         // configure Orekit
+         File home       = new File(System.getProperty("user.home"));
+         File orekitData = new File(home, "orekit-data");
+         if (!orekitData.exists()) {
+             System.err.format(Locale.US, "Failed to find %s folder%n",
+                               orekitData.getAbsolutePath());
+             System.err.format(Locale.US, "You need to download %s from %s, unzip it in %s and rename it 'orekit-data' for this tutorial to work%n",
+                               "orekit-data-master.zip", "https://gitlab.orekit.org/orekit/orekit-data/-/archive/master/orekit-data-master.zip",
+                               home.getAbsolutePath());
+             System.exit(1);
+         }
+         DataProvidersManager manager = DataProvidersManager.getInstance();
+         manager.addProvider(new DirectoryCrawler(orekitData));
+
+   	 } catch (IllegalArgumentException iae) {
+         System.err.println(iae.getLocalizedMessage());
+         System.exit(1);
+     } catch (OrekitException oe) {
+         System.err.println(oe.getLocalizedMessage());
+         System.exit(1);
+     } 
+
+
+   	
+    
+	    // inertial frame
+	    Frame inertialFrame = FramesFactory.getEME2000();
+	   
+
+	    // Initial date
+	    AbsoluteDate initialDate = new AbsoluteDate(2019, 01, 01, 0, 0, 00.000,
+	                                                TimeScalesFactory.getUTC());
+
+	    // Initial orbit
+	    double a = Constants.WGS84_EARTH_EQUATORIAL_RADIUS + 36000*1000; // semi major axis in meters 
+	    double e = FastMath.toRadians(0); // eccentricity
+	    double i = FastMath.toRadians(30);// inclination
+	    double omega = FastMath.toRadians(0); // perigee argument
+	    double raan = FastMath.toRadians(45); // right ascention of ascending node
+	    double anomaly = FastMath.toRadians(0); // True anomaly
+	    Orbit initialOrbit = new KeplerianOrbit(a, e, i, omega, raan, anomaly, PositionAngle.TRUE,inertialFrame, initialDate, Constants.EIGEN5C_EARTH_MU);
+
+	    
+	    // Initial state definition
+	    SpacecraftState initialState = new SpacecraftState(initialOrbit,30); //mass of satellite
+
+	    // Adaptive step integrator with a minimum step of 0.001 and a maximum step of 1000
+	    final double minStep = 0.001;
+	    final double maxstep = 1000;
+	    final double positionTolerance = 0.000001;
+	    final OrbitType propagationType = OrbitType.CARTESIAN;
+	    final double[][] tolerances = NumericalPropagator.tolerances(positionTolerance, initialOrbit, propagationType);
+	    AdaptiveStepsizeIntegrator integrator =new DormandPrince853Integrator(minStep, maxstep, tolerances[0], tolerances[1]);
+
+        //Numerical Propagator
+	    NumericalPropagator numerical = new NumericalPropagator(integrator);
+	    numerical.setOrbitType(propagationType);
+	    numerical.setInitialState(initialState);
+	    
+	    
+	                       //***********Perturbation**********
+	    
+	    //-------------DRAG ATMOSFERICO-------------------------------------------------------------------------------------------------------------------------------------------
+	    final DragForce drag =
+	            new DragForce(new HarrisPriester(CelestialBodyFactory.getSun(),
+	                                             new OneAxisEllipsoid(Constants.WGS84_EARTH_EQUATORIAL_RADIUS,
+	                                                                  Constants.WGS84_EARTH_FLATTENING,
+	                                                                  FramesFactory.getITRF(IERSConventions.IERS_2010, true))),       		
+	            		new IsotropicDrag(1, 2.2)); //Surface (m²), dragCoeff
+	            		
+	    //------------ELISSOIDE-------------------------------------------------------------------------------------------------------------------------------
+	   	    final NormalizedSphericalHarmonicsProvider provider =
+	            GravityFieldFactory.getNormalizedProvider(21, 20);
+	    ForceModel gravity = new HolmesFeatherstoneAttractionModel(FramesFactory.getITRF(IERSConventions.IERS_2010, true), provider);
+	    
+	    //------------RADIAZIONE SOLARE--------------------------------------------------------------------------------------------------------------------------
+	    final RadiationSensitive spacecraft = new IsotropicRadiationClassicalConvention(1, 0.7, 0.2); //Surface (m²), absorption coefficient, specular reflection coefficient 
+	    
+	    
+	    
+	    
+	    
+
+                                     //***************Add perturbation*********************
+  
+	    			//SolarRadiation
+     numerical.addForceModel(new SolarRadiationPressure(CelestialBodyFactory.getSun(),Constants.WGS84_EARTH_EQUATORIAL_RADIUS,spacecraft)); 
+
+	    
+
+	    
+	    // Set the propagator to slave mode (could be omitted as it is the default mode)
+	    numerical.setSlaveMode();
+	    
+	    // Overall duration in seconds for extrapolation
+	    double duration = 86400*365*1; //Day[s] * days *yearsNo
+
+	    
+	    // Stop date
+	    final AbsoluteDate finalDate = initialDate.shiftedBy(duration);
+
+	    // Step duration in seconds
+	    double stepT = 3600.*1*1; //Hour[s] * Hours in a day * days
+	   
+	      
+        // Extrapolation loop
+        int cpt = 0;
+  
+
+        for (AbsoluteDate extrapDate = initialDate;
+             extrapDate.compareTo(finalDate) <= 0;
+             extrapDate = extrapDate.shiftedBy(stepT))  {
+
+        	 
+            SpacecraftState currentState = numerical.propagate(extrapDate);
+
+    	    
+    	    
+            double x	= currentState.getOrbit().getPVCoordinates().getPosition().getX();
+            double y	= currentState.getOrbit().getPVCoordinates().getPosition().getY();
+            double z	= currentState.getOrbit().getPVCoordinates().getPosition().getZ();
+            double xx	= currentState.getOrbit().getPVCoordinates().getVelocity().getX();
+            double yy	= currentState.getOrbit().getPVCoordinates().getVelocity().getY();
+            double zz	= currentState.getOrbit().getPVCoordinates().getVelocity().getZ();
+            
+            System.out.println(x+"\t"+y+"\t"+z+"\t"+xx+"\t"+yy+"\t"+zz+"\t");
+           
+
+            cpt++;
+
+      
+            
+        } 
+      double ciao = 5;
+	 return ciao;
+    }
+    
+    
+	
+
+	public static void main(String[] args) {
+	
+	PerturbationEffect2.getLossAltitude();
+	        } 
+	    } 
+  
